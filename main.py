@@ -1,11 +1,18 @@
-from datetime import datetime
 import json
-import pandas as pd
+import os
+from datetime import datetime
 from time import sleep
+import pandas as pd
 from amz import AmazonTracker
+from discord_webhook import DiscordWebhook
+
+# webhook to send the message to discord
+webhook = DiscordWebhook(url='insert_your_url', username='AmazonPriceTracker', content='')
+ProductsJSON = "products.json"
+ProductsCSV = "products.csv"
 
 
-def amazon_tracker_fun(data_products, df=pd.DataFrame()):
+def amazon_tracker_fun(data_products, df=pd.DataFrame()) -> pd.DataFrame:
     """
     :param data_products: list of pairs [{"name": "product_name", "link": "product_url"}, {...}]
     :param df: if you want to concatenate the results in a previous dataframe send it as param, if not just ignore it
@@ -31,14 +38,14 @@ def amazon_tracker_fun(data_products, df=pd.DataFrame()):
     return df
 
 
-def lower_price(df_new, df_old):
+def lower_price(df_new: pd.DataFrame, df_old: pd.DataFrame) -> pd.DataFrame:
     """
     :param df_new: the dataframe with the new prices
     :param df_old: the historical dataframe with old prices
-    :return: df_filtered, with the products with the lowest price than in df_old (if exists)
+    :return: df_lowers_price, with the products with the lowest price than in df_old (if exists)
     """
     # Prepare the minimum value in historical and order by products
-    if len(df_old) == 0:
+    if df_old.empty:
         df_old = df_new
     else:
         df_old.sort_values(by='Product', inplace=True)
@@ -47,19 +54,15 @@ def lower_price(df_new, df_old):
     df_merged = pd.merge(df_old_min, df_new, on='Product', suffixes=('_hist', '_now'))
     price_diff = df_merged['Price_now'] < df_merged['Price_hist']
     # filter the merged dataframe to show only the rows where the price is lower
-    df_filtered = df_merged[price_diff]
-    return df_filtered
-
-
-ProductsJSON = "products.json"
-ProductsCSV = "products.csv"
+    df_lowers_price = df_merged[price_diff]
+    return df_lowers_price.drop(columns=['link_hist'])
 
 
 def main():
     # Check if historical file exists, if not just load an empty df
-    try:
+    if os.path.exists(ProductsCSV):
         df_hist = pd.read_csv(ProductsCSV)
-    except FileNotFoundError:
+    else:
         df_hist = pd.DataFrame()
 
     while True:
@@ -76,18 +79,20 @@ def main():
         # Check for lower price
         df_lower_price = lower_price(df, df_hist)
         # You can also add a logic where the price has a minimum value, for example send email.
-        if len(df_lower_price) > 0:
-            print(df_lower_price)
+        if not df_lower_price.empty:
+            webhook.content = f"{df_lower_price}"
+            webhook.execute()
 
         # Save the historical results in a csv file
         df_hist = pd.concat([df, df_hist])
         df_hist.to_csv(ProductsCSV, index=False)
 
-        # Wainting time beetwen execution, and also can add a breakpoint here to see the results
+        # Waiting time between execution, and also can add a breakpoint here to see the results
         for i in range(400):
             sleep(1)
             if i == 500:
                 break
+
 
 if __name__ == "__main__":
     main()
